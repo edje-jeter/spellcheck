@@ -82,27 +82,16 @@ rake 'spell:check[/Users/minniemouse/dev/spellcheck/tmp/dictionary.txt,/Users/mi
 Note the single-quotes around 'spell:check[...,...]' and the lack of space between the two file paths. The single quotes are necessary for Zsh. If you're running a different shell you may or may not need the quotes.
 
 ## Setup
-Install Ruby version 3.4.1.
-
-Clone the repo
-```
-git clone 
-```
-Navigate to the root of the repo
-```
-cd spellcheck
-```
-Install dependencies
+- Install Ruby version 3.4.1.
+- Clone the repo 
+- Navigate to the root of the repo
+- Install dependencies, initialize the database, and run migrations
 ```
 bundle install
-```
-Initialize the database and run migrations
-```
 bin/rails db:create
 bin/rails db:migrate
 ```
 Run the spellchecker (see above in "Running the Spellchecker").
-
 
 ## Commentary
 The order of priority for the features as I developed was:
