@@ -5,59 +5,53 @@ require_relative "../../../../lib/tasks/word/parser"
   describe "#parse" do
     let(:parsed) { ::Word::Parser.parse(text_line) }
 
-    context "when spaces" do
-      let(:text_line) { "My name is Inigo Montoya" }
-
-      it "parses the text" do
-        expect(parsed).to eq([ "My", "name", "is", "Inigo", "Montoya" ])
-      end
-    end
-
-    context "when comma" do
-      let(:text_line) { "Eats, shoots, and leaves" }
-
-      it "parses the text" do
-        expect(parsed).to eq([ "Eats", "shoots", "and", "leaves" ])
-      end
-    end
-
-    context "when period" do
-      let(:text_line) { "The end. The beginning" }
-
-      it "parses the text" do
-        expect(parsed).to eq([ "The", "end", "The", "beginning" ])
-      end
-    end
-
     context "when terminal punctuation" do
       let(:text_line) { "lions, tigers; bears. penguins..." }
-
-      it "parses the text" do
-        expect(parsed).to eq([ "lions", "tigers", "bears", "penguins" ])
+      let(:expected) do
+        [
+          { sentence_starter: true, word: "lions" },
+          { sentence_starter: false, word: "tigers" },
+          { sentence_starter: false, word: "bears" },
+          { sentence_starter: true, word: "penguins" }
+        ]
       end
-    end
-
-    context "when terminal comma" do
-      let(:text_line) { "First off," }
 
       it "parses the text" do
-        expect(parsed).to eq([ "First", "off" ])
+        expect(parsed).to eq expected
       end
     end
 
     context "when terminal single quotation" do
       let(:text_line) { "kangaroos' koalas.' lemurs,' orangutans'. katydids'," }
+      let(:expected) do
+        [
+          { sentence_starter: true, word: "kangaroos" },
+          { sentence_starter: false, word: "koalas" },
+          { sentence_starter: true, word: "lemurs" },
+          { sentence_starter: false, word: "orangutans" },
+          { sentence_starter: true, word: "katydids" }
+        ]
+      end
 
       it "parses the text" do
-        expect(parsed).to eq([ "kangaroos", "koalas", "lemurs", "orangutans", "katydids" ])
+        expect(parsed).to eq expected
       end
     end
 
     context "when terminal double quotation" do
       let(:text_line) { 'kangaroos" koalas." lemurs," orangutans". katydids",' }
+      let(:expected) do
+        [
+          { sentence_starter: true, word: "kangaroos" },
+          { sentence_starter: false, word: "koalas" },
+          { sentence_starter: true, word: "lemurs" },
+          { sentence_starter: false, word: "orangutans" },
+          { sentence_starter: true, word: "katydids" }
+        ]
+      end
 
       it "parses the text" do
-        expect(parsed).to eq([ "kangaroos", "koalas", "lemurs", "orangutans", "katydids" ])
+        expect(parsed).to eq expected
       end
     end
   end

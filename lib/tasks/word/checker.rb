@@ -12,21 +12,24 @@ module Word
       let's y'all ain't o'clock
     ])).freeze
 
-    RECOGNIZED_SINGLE_CHARACTER_WORDS = ::Set.new(%w[a i]).freeze
+    RECOGNIZED_SINGLE_CHAR_WORDS = ::Set.new(%w[a i]).freeze
+
     # FUTURE: contractions with more than one apostrophe, eg, fo'c'sle or fo'c's'le
     # FUTURE: contractions with hyphens, eg, I'd've or I'dn't've
     # FUTURE: different characters for apostrophe, eg, '’´
 
     attr_reader :dictionary, :word, :word_original
 
-    def initialize(word, dictionary)
+    def initialize(dictionary, word, sentence_starter = false)
+      @dictionary = dictionary
       @word_original = word
       @word = word.downcase
-      @dictionary = dictionary
+      @sentence_starter = sentence_starter
     end
 
     def check
       return if word.empty?
+      return if capitalized_and_not_sentence_start?
       return if recognized_contraction?
       return if recognized_single_character_word?
       return if number?
@@ -38,6 +41,10 @@ module Word
 
   private
 
+    def capitalized_and_not_sentence_start?
+      !@sentence_starter && @word_original.match?(/\A[A-Z]{1}[a-z']*\z/)
+    end
+
     def has_non_letters? # except for one apostrophe
       !word.match?(/\A[a-z]+('?)[a-z]+\z/)
     end
@@ -45,6 +52,7 @@ module Word
     def in_dictionary?
       word_to_look_up = (possessive? ? word.delete_suffix("'s") : word).downcase
       dictionary.include?(word_to_look_up)
+      # ::DictionaryWord.exists?(word: word_to_look_up)
     end
 
     def number?
@@ -60,7 +68,7 @@ module Word
     end
 
     def recognized_single_character_word?
-      RECOGNIZED_SINGLE_CHARACTER_WORDS.include?(word)
+      RECOGNIZED_SINGLE_CHAR_WORDS.include?(word)
     end
   end
 end
