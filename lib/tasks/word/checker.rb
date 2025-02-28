@@ -20,23 +20,24 @@ module Word
 
     attr_reader :dictionary, :word, :word_original
 
-    def initialize(dictionary, word, sentence_starter = false)
+    def initialize(dictionary)
       @dictionary = dictionary
+    end
+
+    def unrecognized?(word, sentence_starter = false)
       @word_original = word
       @word = word.downcase
       @sentence_starter = sentence_starter
-    end
 
-    def check
-      return if word.empty?
-      return if capitalized_and_not_sentence_start?
-      return if recognized_contraction?
-      return if recognized_single_character_word?
-      return if number?
-      return word if has_non_letters?
-      return if in_dictionary?
+      return false if word.empty?
+      return false if capitalized_and_not_sentence_start?
+      return false if recognized_contraction?
+      return false if recognized_single_character_word?
+      return false if number?
+      return true if has_non_letters? && !possessive?
+      return false if in_dictionary? # we want the dictionary lookup to be last because it's the most expensive
 
-      word_original
+      true
     end
 
   private
@@ -45,14 +46,13 @@ module Word
       !@sentence_starter && @word_original.match?(/\A[A-Z]{1}[a-z']*\z/)
     end
 
-    def has_non_letters? # except for one apostrophe
-      !word.match?(/\A[a-z]+('?)[a-z]+\z/)
+    def has_non_letters?
+      !word.match?(/\A[a-z]+\z/)
     end
 
     def in_dictionary?
       word_to_look_up = (possessive? ? word.delete_suffix("'s") : word).downcase
       dictionary.include?(word_to_look_up)
-      # ::DictionaryWord.exists?(word: word_to_look_up)
     end
 
     def number?

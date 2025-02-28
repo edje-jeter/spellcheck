@@ -1,21 +1,54 @@
 module Word
   class Suggester
-    attr_reader :word, :patterns
+    SUGGESTION_BANK_BATCH_SIZE = 25_000
 
-    def initialize(word)
-      @word = word
-      @patterns = Patterns.new(word)
+    attr_reader :word, :patterns, :suggestion_bank_word_count, :suggestions
+
+    def initialize(dictionary)
+      @dictionary = dictionary
+      @suggestion_bank_word_count = 0
+      @suggestions = {}
     end
 
-    def suggestions
-      output = first_suggestions
-      return output if output.present?
+    def create_suggestion_bank
+      @time_start = Time.now
+      # ::DictionaryWord.delete_all
 
-      output = second_suggestions(output)
-      output
+      # @dictionary.each_slice(SUGGESTION_BANK_BATCH_SIZE) do |words|
+      #   ::DictionaryWord.insert_all!(words.map { |word| { word: word } })
+      #   @suggestion_bank_word_count += words.size
+      #   puts batch_msg(words)
+      # end
+
+      puts suggestion_bank_msg
+    end
+
+    def add_suggestion(word_original)
+      word = word_original.downcase
+      return @suggestions[word] if @suggestions[word]
+
+      @patterns = Patterns.new(word)
+      suggestion = first_suggestions.presence || second_suggestions
+      @suggestions[word] = suggestion
+
+      suggestion
     end
 
   private
+
+    def batch_msg(words)
+      [
+        "  Added #{number_with_delimiter(words.size)} words:",
+        "#{number_with_delimiter(@suggestion_bank_word_count)}"
+      ].join(" ")
+    end
+
+    def suggestion_bank_msg
+      word_count = number_with_delimiter(@suggestion_bank_word_count)
+      time_stop = Time.now
+      duration = (time_stop - @time_start).round(2)
+      "\n  Suggestion bank initialized with #{word_count} words in #{duration} seconds\n\n"
+    end
 
     def first_suggestions
       conditions = patterns.first_attempt.map { |pattern| "word LIKE ?" }.join(" OR ")
@@ -24,7 +57,7 @@ module Word
       ::DictionaryWord.where(conditions, *values).map { |dw| dw.word }
     end
 
-    def second_suggestions(output)
+    def second_suggestions
       return [] if patterns.multi_error_ending.empty?
 
       conditions = patterns.multi_error_ending.map { |pattern| "word LIKE ?" }.join(" OR ")
