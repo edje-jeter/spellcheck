@@ -20,10 +20,16 @@ namespace :spell do
     @dictionary = ::File.readlines(@dict_path, chomp: true).map(&:downcase).to_set
 
     puts main_header
+
     puts section_header("Populating suggestion bank")
     suggester = ::Word::Suggester.new(@dictionary)
-    # TODO: move puts statements to the rake task
-    suggester.create_suggestion_bank
+
+    suggester.batches.each do |words|
+      suggester.add_words(words)
+      puts suggestion_bank_batch_added_msg(words.size, suggester.word_count)
+    end
+
+    puts suggestion_bank_completed_msg(suggester.word_count, suggester.creation_duration)
 
     puts unrecognized_words_report_header
     @spell_checker = ::Word::SpellChecker.new(@text_path, @dictionary)

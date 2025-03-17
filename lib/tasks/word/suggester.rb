@@ -2,26 +2,49 @@ module Word
   class Suggester
     SUGGESTION_BANK_BATCH_SIZE = 25_000
 
-    attr_reader :word, :patterns, :suggestion_bank_word_count, :suggestions
+    attr_reader :creation_duration, :word_count, :suggestions
 
     def initialize(dictionary)
-      @dictionary = dictionary
-      @suggestion_bank_word_count = 0
+      @dictionary = dictionary.to_a.each_slice(SUGGESTION_BANK_BATCH_SIZE)
+      ::DictionaryWord.delete_all
+      @word_count = 0
       @suggestions = {}
+      @duration = 0.0
     end
 
-    def create_suggestion_bank
-      @time_start = Time.now
-      # ::DictionaryWord.delete_all
-
-      # @dictionary.each_slice(SUGGESTION_BANK_BATCH_SIZE) do |words|
-      #   ::DictionaryWord.insert_all!(words.map { |word| { word: word } })
-      #   @suggestion_bank_word_count += words.size
-      #   puts batch_msg(words)
-      # end
-
-      puts suggestion_bank_msg
+    def add_words(words)
+      @creation_time_start ||= Time.now
+      ::DictionaryWord.insert_all!(words.map { |word| { word: word } })
+      @word_count += words.size
+      @creation_duration = Time.now - @creation_time_start
     end
+
+    # def batch_size
+    #   SUGGESTION_BANK_BATCH_SIZE
+    # end
+
+    def batches
+      @dictionary.to_a.each_slice(SUGGESTION_BANK_BATCH_SIZE).map { |batch| batch }.first
+    end
+
+    def next_batch
+      @dictionary.next
+    rescue StopIteration
+      nil
+    end
+
+    # def create_suggestion_bank
+    #   time_start = Time.now
+    #   ::DictionaryWord.delete_all
+
+    #   @dictionary.each_slice(SUGGESTION_BANK_BATCH_SIZE) do |words|
+    #     ::DictionaryWord.insert_all!(words.map { |word| { word: word } })
+    #     @word_count += words.size
+    #     puts batch_msg(words)
+    #   end
+
+    #   @duration = Time.now - time_start
+    # end
 
     def add_suggestion(word_original)
       word = word_original.downcase
@@ -36,18 +59,13 @@ module Word
 
   private
 
+    attr_reader :patterns
+
     def batch_msg(words)
       [
         "  Added #{number_with_delimiter(words.size)} words:",
-        "#{number_with_delimiter(@suggestion_bank_word_count)}"
+        "#{number_with_delimiter(@word_count)}"
       ].join(" ")
-    end
-
-    def suggestion_bank_msg
-      word_count = number_with_delimiter(@suggestion_bank_word_count)
-      time_stop = Time.now
-      duration = (time_stop - @time_start).round(2)
-      "\n  Suggestion bank initialized with #{word_count} words in #{duration} seconds\n\n"
     end
 
     def first_suggestions

@@ -60,6 +60,19 @@ module Word
       "\n--- #{title} ---"
     end
 
+    def suggestion_bank_batch_added_msg(word_count, suggestion_bank_word_count)
+      [
+        "  Added #{number_with_delimiter(word_count)} words:",
+        "#{number_with_delimiter(suggestion_bank_word_count)}"
+      ].join(" ")
+    end
+
+    def suggestion_bank_completed_msg(raw_word_count, raw_duration)
+      word_count = number_with_delimiter(raw_word_count)
+      duration = raw_duration.round(2)
+      "\n  Suggestion bank populated with #{word_count} words in #{duration} seconds\n\n"
+    end
+
     def unrecognized_word_report(*args)
       UnrecognizedWordReport.new(*args).generate
     end
