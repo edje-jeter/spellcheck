@@ -208,6 +208,8 @@ end
 Coordinate = Struct.new(:x, :y)
 
 class Othello
+  COLUMNS = "abcdefgh".freeze
+
   def initialize
     @spaces = Array.new(8) { Array.new(8) }
     @spaces[3][3] = :black
@@ -215,26 +217,11 @@ class Othello
     @spaces[4][3] = :white
     @spaces[4][4] = :black
 
-    # @spaces[0][0] = :a
-    # @spaces[0][1] = :b
-    # @spaces[0][2] = :c
-    # @spaces[0][3] = :d
-    # @spaces[0][4] = :e
-    # @spaces[0][5] = :f
-    # @spaces[0][6] = :g
-    # @spaces[0][7] = :h
-
-    # @spaces[7][0] = :a
-    # @spaces[7][1] = :b
-    # @spaces[7][2] = :c
-    # @spaces[7][3] = :d
-    # @spaces[7][4] = :e
-    # @spaces[7][5] = :f
-    # @spaces[7][6] = :g
-    # @spaces[7][7] = :h
-
     @current_turn_is_black = true
     @coords = ""
+    @endgame_watch = false
+
+    @format = nil
   end
 
   def render
@@ -251,84 +238,110 @@ class Othello
     end
   end
 
+  def choose_format
+    puts "Choose a format: 1: human vs human, 2: human vs computer, 3: computer vs computer."
+    format_str = gets.strip
+    abort if format_str == "exit"
+
+    @format = case format_str
+    when "1" then :human_v_human
+    when "2" then :human_v_computer
+    when "3" then :computer_v_computer
+    else
+      puts "Invalid format: #{@format_str}."
+      choose_format
+    end
+
+    puts "You chose #{format_str}: #{@format}."
+    puts ""
+  end
+
   def get_move_input
     @coords = gets.strip
     abort if @coords == "exit"
 
-    row, col = @coords.chars
-    x = [ 0, [ 7, row.ord - "a".ord ].min ].max
-    y = [ 0, [ 7, col.ord - "1".ord ].min ].max
-    Coordinate.new(x, y)
+    is_input_valid = @coords.match?(/^[a-hA-H][1-8]$/)
+
+    if is_input_valid
+      row, col = @coords.chars
+      x = [ 0, [ 7, row.ord - "a".ord ].min ].max
+      y = [ 0, [ 7, col.ord - "1".ord ].min ].max
+      Coordinate.new(x, y)
+    else
+      :invalid_input
+    end
+
   rescue => e
     puts e
     retry
   end
 
-  def toggle_current_player
+  def toggle_player
     @current_turn_is_black = !@current_turn_is_black
   end
 
-  def current_player_color
+  def current_color
     @current_turn_is_black ? :black : :white
   end
 
-  def non_current_player_color
+  def opponent_color
     @current_turn_is_black ? :white : :black
-  end
-
-  def move_does_not_reverse_any_tokens?(coordinate)
-    @spaces[coordinate.y][coordinate.x] = current_player_color
-
-    # horizontal
-    # horizontal_pattern = @spaces[coordinate.y].join("")
-    # puts horizontal_pattern
-    # aaa = horizontal_pattern =~ /#{current_player_color}.*#{current_player_color}/
-    # aaa = horizontal_pattern =~ /black.*white/
-    # puts "aaa: #{aaa}"
-
-    # puts @spaces[coordinate.y][coordinate.x]
-
-    # vertical
-    # Diagonal positive
-    # Diagonal negative
-
-    @spaces[coordinate.y][coordinate.x] = nil
   end
 
   def space_occupied?(coordinate)
     !@spaces[coordinate.y][coordinate.x].nil?
   end
 
-  # PossiblePlay class evaluates all the possibilities for a single placement.
-  # It has methods to determine if a move is valid and how many opponents will flip.
-  # It instantiates 8 Checkers, one for each direction.
-  class PossiblePlay
-    def initialize(spaces, idx_x, idx_y)
-      @spaces = spaces.dup
-      @idx_x = idx_x
-      @idx_y = idx_y
-      @checkers = [
-        Checker.new(spaces, idx_x, idx_y),
-        Checker.new(spaces, idx_x, idx_y),
-        Checker.new(spaces, idx_x, idx_y),
-        Checker.new(spaces, idx_x, idx_y),
-        Checker.new(spaces, idx_x, idx_y),
-        Checker.new(spaces, idx_x, idx_y),
-        Checker.new(spaces, idx_x, idx_y),
-        Checker.new(spaces, idx_x, idx_y)
-      ]
+  class PotentialPlay
+    ANGLES_TO_CHECK = [
+      :horiz_left,
+      :horiz_right,
+      :vert_up,
+      :vert_down,
+      :diag_pos_up,
+      :diag_pos_down,
+      :diag_neg_up,
+      :diag_neg_down
+    ]
+
+    attr_reader :enclosed_opponents_count, :transformed_spaces, :x, :y
+
+    def initialize(spaces, placed_x, placed_y, color)
+      @placed_x = placed_x
+      @placed_y = placed_y
+      @x = placed_x
+      @y = placed_y
+      @color = color
+
+      @transformed_spaces = ::Marshal.load(::Marshal.dump(spaces))
+      @transformed_spaces[@placed_y][@placed_x] = @color
+
+      @is_valid = false
+      @enclosed_opponents_count = 0
+    end
+
+    def check
+      ANGLES_TO_CHECK.each do |angle|
+        checker = AngleChecker.new(@transformed_spaces, @placed_x, @placed_y, @color, angle)
+        checker.check
+
+        if checker.has_enclosure?
+          @is_valid = true
+          @transformed_spaces = checker.transformed_spaces
+          @enclosed_opponents_count += checker.enclosed_opponents_count
+        end
+      end
+    end
+
+    def valid?
+      @is_valid
     end
   end
 
-  # Checker class evaluates a play in one direction, eg, horiz_left, horiz_right, vert_up,
-  # vert_down, diag_pos_up, diag_pos_down, diag_neg_up, and diag_neg_down. It has methods
-  # to determine if the move is valid (for this direction), how many opponents will flip,
-  # and which coordinates should flip (but something else does the flipping).
-  class Checker
-    attr_reader :farthest_enclosing_x, :farthest_enclosing_y, :enclosed_opponents_count
+  class AngleChecker
+    attr_reader :farthest_enclosing_x, :farthest_enclosing_y, :enclosed_opponents_count, :transformed_spaces
 
     def initialize(spaces, idx_x, idx_y, color, movement)
-      @spaces = spaces.dup
       @transformed_spaces = spaces.dup
       @placed_x = idx_x
       @placed_y = idx_y
@@ -381,23 +394,24 @@ class Othello
       @has_enclosure
     end
 
+    def keep_transforming?
+      case @movement
+      when :horiz_left     then @idx_x >= @farthest_enclosing_x
+      when :horiz_right    then @idx_x <= @farthest_enclosing_x
+      when :vert_up        then @idx_y >= @farthest_enclosing_y
+      when :vert_down      then @idx_y <= @farthest_enclosing_y
+      when :diag_pos_up    then @idx_y >= @farthest_enclosing_y && @idx_x <= @farthest_enclosing_x
+      when :diag_pos_down  then @idx_y <= @farthest_enclosing_y && @idx_x >= @farthest_enclosing_x
+      when :diag_neg_up    then @idx_y >= @farthest_enclosing_y && @idx_x >= @farthest_enclosing_x
+      when :diag_neg_down  then @idx_y <= @farthest_enclosing_y && @idx_x <= @farthest_enclosing_x
+      end
+    end
+
     def transform
       @idx_x = @placed_x
       @idx_y = @placed_y
 
-      # while horiz_left_edit_idx > farthest_left_enclosing_x
-      # while horiz_right_edit_idx <= farthest_right_enclosing_x
-      # while vert_up_edit_idx >= farthest_up_enclosing_y
-      # while vert_down_edit_idx <= farthest_down_enclosing_y
-      # while diag_pos_up_y_edit_idx >= farthest_up_enclosing_y
-
-      # while horiz_left_edit_idx > farthest_left_enclosing_x
-      # while horiz_right_edit_idx <= farthest_right_enclosing_x
-      # while vert_up_edit_idx >= farthest_up_enclosing_y
-      # while vert_down_edit_idx <= farthest_down_enclosing_y
-      # while diag_pos_up_y_edit_idx >= farthest_up_enclosing_y
-
-      while @idx_x > @farthest_enclosing_x && @idx_y > @farthest_enclosing_y
+      while keep_transforming?
         @transformed_spaces[@idx_y][@idx_x] = @color
         move_one_space
       end
@@ -405,7 +419,7 @@ class Othello
 
     def check
       while keep_checking?
-        color_of_current_space = @spaces[@idx_y][@idx_x]
+        color_of_current_space = @transformed_spaces[@idx_y][@idx_x]
 
         if color_of_current_space.nil?
           @stopped_by_empty_space = true
@@ -428,6 +442,8 @@ class Othello
 
         move_one_space
       end
+
+      transform if @has_enclosure
     end
   end
 
@@ -443,328 +459,101 @@ class Othello
   # Extra extra credit: Have the computer make at least somewhat strategic moves rather than just some legal
   # move.
   def play
+    choose_format
+
     loop do
       render()
-      puts "#{current_player_color}'s move:"
-      coordinate = get_move_input()
+      puts "#{current_color}'s move:"
 
-      if space_occupied?(coordinate)
-        puts "Space #{@coords} is occupied. Please try again."
-        next
-      end
+      if (@format == :human_v_human) || (@format == :human_v_computer && current_color == :black)
+        coordinate = get_move_input()
 
-      # if move_does_not_reverse_any_tokens?(coordinate)
-      #   puts "Move does not reverse any opponent tokens. Please try again."
-      #   next
-      # end
+        if coordinate == :invalid_input
+          puts "Invalid input: #{@coords}. Please try again."
+          next
+        end
 
-      @spaces[coordinate.y][coordinate.x] = current_player_color
-
-      puts "---------"
-      puts "position: #{@coords}"
-      puts "current player: #{current_player_color}"
-
-      is_valid_move = false
-
-      # # horiz left
-      # horiz_left_idx = coordinate.x
-      # has_non_current_color = false
-      # has_enclosing_current_color = false
-      # farthest_left_enclosing_x = nil
-      # potentially_enclosed_opponents_count = 0
-      # enclosed_opponents_count = 0
-
-      # while horiz_left_idx >= 0
-      #   val = @spaces[coordinate.y][horiz_left_idx]
-      #   break if val.nil?
-
-      #   if val == non_current_player_color
-      #     has_non_current_color = true
-      #     potentially_enclosed_opponents_count += 1
-      #   end
-
-      #   if has_non_current_color && val == current_player_color
-      #     has_enclosing_current_color = true
-      #     farthest_left_enclosing_x = horiz_left_idx
-      #     enclosed_opponents_count += potentially_enclosed_opponents_count
-      #     potentially_enclosed_opponents_count = 0
-      #   end
-
-      #   horiz_left_idx -= 1
-      # end
-
-      # if has_enclosing_current_color
-      #   is_valid_move = true
-      #   horiz_left_edit_idx = coordinate.x
-
-      #   while horiz_left_edit_idx > farthest_left_enclosing_x
-      #     @spaces[coordinate.y][horiz_left_edit_idx] = current_player_color
-      #     horiz_left_edit_idx -= 1
-      #   end
-      # end
-
-      horiz_left = Checker.new(@spaces, coordinate.x, coordinate.y, current_player_color, :horiz_left)
-      horiz_left.check
-
-      if horiz_left.has_enclosure?
-        is_valid_move = true
-        horiz_left_edit_idx = coordinate.x
-
-        while horiz_left_edit_idx > horiz_left.farthest_enclosing_x
-          @spaces[coordinate.y][horiz_left_edit_idx] = current_player_color
-          horiz_left_edit_idx -= 1
+        if space_occupied?(coordinate)
+          puts "Space #{@coords} is occupied. Please try again."
+          next
         end
       end
 
-      # horiz right
-      horiz_right_idx = coordinate.x
-      has_non_current_color = false
-      has_enclosing_current_color = false
-      farthest_right_enclosing_x = nil
-      potentially_enclosed_opponents_count = 0
-      enclosed_opponents_count = 0
+      possible_plays = []
+      @spaces.each_with_index do |row, y|
+        row.each_with_index do |entry, x|
+          next unless entry.nil?
 
-      while horiz_right_idx <= 7
-        val = @spaces[coordinate.y][horiz_right_idx]
-        break if val.nil?
+          potential_play = PotentialPlay.new(@spaces, x, y, current_color)
+          potential_play.check
 
-        if val == non_current_player_color
-          has_non_current_color = true
-          potentially_enclosed_opponents_count += 1
-        end
-
-        if has_non_current_color && val == current_player_color
-          has_enclosing_current_color = true
-          farthest_right_enclosing_x = horiz_right_idx
-          enclosed_opponents_count += potentially_enclosed_opponents_count
-          potentially_enclosed_opponents_count = 0
-        end
-
-        horiz_right_idx += 1
-      end
-
-      if has_enclosing_current_color
-        is_valid_move = true
-        horiz_right_edit_idx = coordinate.x
-
-        while horiz_right_edit_idx <= farthest_right_enclosing_x
-          @spaces[coordinate.y][horiz_right_edit_idx] = current_player_color
-          horiz_right_edit_idx += 1
+          if potential_play.valid?
+            possible_plays << potential_play
+          end
         end
       end
 
-      # vert up
-      vert_up_idx = coordinate.y
-      has_non_current_color = false
-      has_enclosing_current_color = false
-      farthest_up_enclosing_y = nil
-      potentially_enclosed_opponents_count = 0
-      enclosed_opponents_count = 0
-
-      while vert_up_idx >= 0
-        val = @spaces[vert_up_idx][coordinate.x]
-        break if val.nil?
-
-        if val == non_current_player_color
-          has_non_current_color = true
-          potentially_enclosed_opponents_count += 1
+      if possible_plays.empty?
+        if @endgame_watch == true
+          puts "No valid moves for #{current_color}."
+          puts ""
+          puts "================================"
+          puts "Game over!"
+          puts "================================"
+          puts ""
+          puts "Final board:"
+          render()
+          puts ""
+          white_score = @spaces.flatten.count { |space| space == :white }
+          black_score = @spaces.flatten.count { |space| space == :black }
+          puts "Scores:"
+          puts "Black: #{black_score}"
+          puts "White: #{white_score}"
+          puts ""
+          if black_score > white_score
+            puts "Black wins!"
+          elsif white_score > black_score
+            puts "White wins!"
+          else
+            puts "It's a tie!"
+          end
+          break
+        else
+          @endgame_watch = true
+          puts "No valid moves for #{current_color}."
+          puts ""
+          toggle_player
+          next
         end
-
-        if has_non_current_color && val == current_player_color
-          has_enclosing_current_color = true
-          farthest_up_enclosing_y = vert_up_idx
-          enclosed_opponents_count += potentially_enclosed_opponents_count
-          potentially_enclosed_opponents_count = 0
-        end
-
-        vert_up_idx -= 1
+      else
+        @endgame_watch = false
       end
 
-      if has_enclosing_current_color
-        is_valid_move = true
-        vert_up_edit_idx = coordinate.y
+      if @format == :computer_v_computer || (@format == :human_v_computer && current_color == :white)
+        max_score = possible_plays.max_by(&:enclosed_opponents_count)&.enclosed_opponents_count
+        selected_play = possible_plays.select { |valid_potential_play| valid_potential_play.enclosed_opponents_count == max_score }.sample if max_score
+      else
+        selected_play = PotentialPlay.new(@spaces, coordinate.x, coordinate.y, current_color)
+        selected_play.check
 
-        while vert_up_edit_idx >= farthest_up_enclosing_y
-          @spaces[vert_up_edit_idx][coordinate.x] = current_player_color
-          vert_up_edit_idx -= 1
-        end
-      end
-
-      # vert down
-      vert_down_idx = coordinate.y
-      has_non_current_color = false
-      has_enclosing_current_color = false
-      farthest_down_enclosing_y = nil
-      potentially_enclosed_opponents_count = 0
-      enclosed_opponents_count = 0
-
-      while vert_down_idx <= 7
-        val = @spaces[vert_down_idx][coordinate.x]
-        break if val.nil?
-
-        if val == non_current_player_color
-          has_non_current_color = true
-          potentially_enclosed_opponents_count += 1
-        end
-
-        if has_non_current_color && val == current_player_color
-          has_enclosing_current_color = true
-          farthest_down_enclosing_y = vert_down_idx
-          enclosed_opponents_count += potentially_enclosed_opponents_count
-          potentially_enclosed_opponents_count = 0
-        end
-
-        vert_down_idx += 1
-      end
-
-      if has_enclosing_current_color
-        is_valid_move = true
-        vert_down_edit_idx = coordinate.y
-
-        while vert_down_edit_idx <= farthest_down_enclosing_y
-          @spaces[vert_down_edit_idx][coordinate.x] = current_player_color
-          vert_down_edit_idx += 1
+        unless selected_play.valid?
+          puts "Position #{@coords} is not playable by #{current_color}. Please try again."
+          puts ""
+          next
         end
       end
 
-      # diag pos up
-      diag_pos_up_y_idx = coordinate.y
-      diag_pos_up_x_idx = coordinate.x
+      output_coords = COLUMNS[selected_play.x] + (selected_play.y + 1).to_s
+      puts output_coords
+      @spaces = selected_play.transformed_spaces
+      puts ""
+      puts "--------------------------------"
+      puts "#{current_color} placed at #{output_coords} and flipped #{selected_play.enclosed_opponents_count} #{opponent_color}s."
+      puts "Black: #{@spaces.flatten.count { |space| space == :black } }"
+      puts "White: #{@spaces.flatten.count { |space| space == :white } }"
+      puts ""
 
-      has_non_current_color = false
-      has_enclosing_current_color = false
-      farthest_up_enclosing_y = nil
-      potentially_enclosed_opponents_count = 0
-      enclosed_opponents_count = 0
-
-      while diag_pos_up_y_idx >= 0 && diag_pos_up_x_idx <= 7
-        val = @spaces[diag_pos_up_y_idx][diag_pos_up_x_idx]
-        break if val.nil?
-
-        if val == non_current_player_color
-          has_non_current_color = true
-          potentially_enclosed_opponents_count += 1
-        end
-
-        if has_non_current_color && val == current_player_color
-          has_enclosing_current_color = true
-          farthest_up_enclosing_y = diag_pos_up_y_idx
-          enclosed_opponents_count += potentially_enclosed_opponents_count
-          potentially_enclosed_opponents_count = 0
-        end
-
-        diag_pos_up_y_idx -= 1
-        diag_pos_up_x_idx += 1
-      end
-
-      if has_enclosing_current_color
-        is_valid_move = true
-        diag_pos_up_y_edit_idx = coordinate.y
-        diag_pos_up_x_edit_idx = coordinate.x
-
-        while diag_pos_up_y_edit_idx >= farthest_up_enclosing_y
-          @spaces[diag_pos_up_y_edit_idx][diag_pos_up_x_edit_idx] = current_player_color
-          diag_pos_up_y_edit_idx -= 1
-          diag_pos_up_x_edit_idx += 1
-        end
-      end
-
-      # diag pos down
-      # diag neg up
-      # diag neg down
-
-      @spaces[coordinate.y][coordinate.x] = nil unless is_valid_move
-
-
-      # vertical = @spaces.map { |row| row[coordinate.x] }
-      # puts "vertical: #{vertical}"
-
-      # diag_neg_d = [ 0, coordinate.y - coordinate.x ].max
-      # diag_neg_h = [ 0, coordinate.x - coordinate.y ].max
-      # diag_neg = []
-      # diag_neg_coords = []
-
-      # while diag_neg_d < 8 && diag_neg_h < 8
-      #   diag_neg << @spaces[diag_neg_d][diag_neg_h]
-      #   diag_neg_coords << [ diag_neg_d, diag_neg_h ]
-      #   diag_neg_d += 1
-      #   diag_neg_h += 1
-      # end
-      # puts "diag neg: #{diag_neg}"
-      # puts diag_neg.join(",")
-
-      # diag_pos_d = [ 7, coordinate.y + coordinate.x ].min
-      # diag_pos_h = [ 0, coordinate.x - (7 - coordinate.y) ].max
-      # diag_pos = []
-      # diag_pos_coords = []
-
-      # while diag_pos_d >= 0 && diag_pos_h < 8
-      #   diag_pos << @spaces[diag_pos_d][diag_pos_h]
-      #   diag_pos_coords << [ diag_pos_d, diag_pos_h ]
-      #   diag_pos_d -= 1
-      #   diag_pos_h += 1
-      # end
-      # puts "diag pos: #{diag_pos}"
-      # puts "========="
-
-      # # TODO: gotta handle BWB --> WBWB --> WWWB
-      # # Currently we see WBWB and reject it because it doesn't start and end with W
-
-      # horizontal_str = horizontal.join(",")
-      # vertical_str = vertical.join(",")
-      # diag_neg_str = diag_neg.join(",")
-      # diag_pos_str = diag_pos.join(",")
-
-      # cpc = current_player_color
-      # ncc = non_current_player_color
-
-      # aaa = /^,*#{cpc},+#{ncc}(?:,+#{cpc}|,+#{ncc})*,+#{cpc},*$/
-
-      # # puts horizontal_str
-      # @valid_horizontal = horizontal_str =~ aaa
-      # # puts vertical_str
-      # @valid_vertical = vertical_str =~ aaa
-      # # puts diag_neg_str
-      # @valid_diag_neg = diag_neg_str =~ aaa
-      # # puts diag_pos_str
-      # @valid_diag_pos = diag_pos_str =~ aaa
-
-      # puts @valid_horizontal
-      # puts @valid_vertical
-      # puts @valid_diag_neg
-      # puts @valid_diag_pos
-
-      # if @valid_horizontal || @valid_vertical || @valid_diag_neg || @valid_diag_pos
-      #   puts "Valid move"
-
-      #   if @valid_horizontal
-      #     @spaces[coordinate.y].each_with_index do |space_color, i|
-      #       next if space_color.nil?
-
-      #       @spaces[coordinate.y][i] = current_player_color
-      #     end
-      #   end
-
-      #   if @valid_diag_pos
-      #     diag_pos_coords.each do |coord|
-      #       if @spaces[coord[0]][coord[1]] == non_current_player_color
-      #         @spaces[coord[0]][coord[1]] = current_player_color
-      #       end
-      #     end
-      #   end
-
-      #   if @valid_diag_neg
-      #     diag_neg_coords.each do |coord|
-      #       @spaces[coord[0]][coord[1]] = current_player_color
-      #     end
-      #   end
-      # else
-      #   puts "Invalid move"
-      #   @spaces[coordinate.y][coordinate.x] = nil
-      #   next
-      # end
-
-      toggle_current_player
+      toggle_player
     end
   end
 end
