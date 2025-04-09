@@ -1,4 +1,4 @@
-#!/usr/bin/ruby
+# !/usr/bin/ruby
 
 ################################################################################
 # CONFIDENTIAL
@@ -205,8 +205,6 @@ end
 #     Online game with valid move highlighting:
 #       https://www.topster.net/reversi/zweispieler.html
 
-Coordinate = Struct.new(:x, :y)
-
 class Othello
   COLUMNS = "abcdefgh".freeze
 
@@ -217,14 +215,15 @@ class Othello
     @spaces[4][3] = :white
     @spaces[4][4] = :black
 
+    @coordinate = nil
     @current_turn_is_black = true
     @coords = ""
-    @endgame_watch = false
+    @previous_player_blocked = false
 
     @format = nil
   end
 
-  def render
+  def show_current_board
     print " "
     ("a".."h").each { |x| print " ", x }
     puts
@@ -239,7 +238,7 @@ class Othello
   end
 
   def choose_format
-    puts "Choose a format: 1: human vs human, 2: human vs computer, 3: computer vs computer."
+    puts "Choose a format: 1: human vs human, 2: human vs computer, 3: computer vs computer, 4: max vs min."
     format_str = gets.strip
     abort if format_str == "exit"
 
@@ -247,6 +246,7 @@ class Othello
     when "1" then :human_v_human
     when "2" then :human_v_computer
     when "3" then :computer_v_computer
+    when "4" then :max_v_min
     else
       puts "Invalid format: #{@format_str}."
       choose_format
@@ -256,24 +256,39 @@ class Othello
     puts ""
   end
 
-  def get_move_input
-    @coords = gets.strip
+  def show_bad_input(msg)
+    puts ""
+    puts "<<<<< #{msg}. Please try again. <<<<<"
+    puts ""
+  end
+
+  def parse_coords
+    row, col = @coords.chars
+    @placed_x = [ 0, [ 7, row.ord - "a".ord ].min ].max
+    @placed_y = [ 0, [ 7, col.ord - "1".ord ].min ].max
+  end
+
+  def validate_and_parse_human_input
+    @human_input_valid = @coords.match?(/^[a-hA-H][1-8]$/)
+    return show_bad_input("Invalid input") unless @human_input_valid
+
+    parse_coords
+
+    if space_occupied?
+      @human_input_valid = false
+      show_bad_input("Space occupied")
+    end
+  end
+
+  def human_input_invalid?
+    !@human_input_valid
+  end
+
+  def retrieve_human_input
+    @coords = gets.strip.downcase
     abort if @coords == "exit"
 
-    is_input_valid = @coords.match?(/^[a-hA-H][1-8]$/)
-
-    if is_input_valid
-      row, col = @coords.chars
-      x = [ 0, [ 7, row.ord - "a".ord ].min ].max
-      y = [ 0, [ 7, col.ord - "1".ord ].min ].max
-      Coordinate.new(x, y)
-    else
-      :invalid_input
-    end
-
-  rescue => e
-    puts e
-    retry
+    validate_and_parse_human_input
   end
 
   def toggle_player
@@ -288,8 +303,137 @@ class Othello
     @current_turn_is_black ? :white : :black
   end
 
-  def space_occupied?(coordinate)
-    !@spaces[coordinate.y][coordinate.x].nil?
+  def space_occupied?
+    !@spaces[@placed_y][@placed_x].nil?
+  end
+
+  def find_possible_plays
+    @possible_plays = []
+
+    @spaces.each_with_index do |row, y|
+      row.each_with_index do |entry, x|
+        next unless entry.nil?
+
+        potential_play = PotentialPlay.new(@spaces, x, y, current_color)
+        potential_play.check
+
+        @possible_plays << potential_play if potential_play.valid?
+      end
+    end
+
+    @possible_plays
+  end
+
+  def outcome
+    if @black_score > @white_score
+      "Black wins!"
+    elsif @white_score > @black_score
+      "White wins!"
+    else
+      "It's a tie!"
+    end
+  end
+
+  def show_final
+    puts ""
+    puts "================================"
+    puts "Game over! #{outcome}"
+    puts "Black: #{@black_score}"
+    puts "White: #{@white_score}"
+    puts "================================"
+    puts ""
+  end
+
+  def flip_count_msg(count)
+    label = count == 1 ? opponent_color : "#{opponent_color}s"
+    "flipped #{count} #{label}"
+  end
+
+  def score(color)
+    @spaces.flatten.count { |space| space == color }
+  end
+
+  def update_after_move
+    @spaces = @selected_play.transformed_spaces
+    @white_score = score(:white)
+    @black_score = score(:black)
+  end
+
+  def show_post_move_report
+    output_coords = COLUMNS[@selected_play.x] + (@selected_play.y + 1).to_s
+    placement_msg = "#{current_color} placed at #{output_coords}"
+    count_msg = flip_count_msg(@selected_play.flip_count)
+
+    puts output_coords unless need_human_input?
+    puts ""
+    puts "--------------------------------"
+    puts "#{placement_msg} and #{count_msg}."
+    puts "Black: #{@black_score}"
+    puts "White: #{@white_score}"
+    puts ""
+  end
+
+  def both_players_blocked?
+    current_player_blocked? && previous_player_blocked?
+  end
+
+  def current_player_blocked?
+    @possible_plays.empty?
+  end
+
+  def previous_player_blocked?
+    @previous_player_blocked
+  end
+
+  def reset_blocked_player_counter
+    @previous_player_blocked = false
+  end
+
+  def show_current_player_blocked
+    puts "No valid moves for #{current_color}."
+    puts ""
+  end
+
+  def show_next_move_prompt
+    puts "-----------------"
+    puts "#{current_color}'s move:"
+  end
+
+  def need_human_input?
+    @format == :human_v_human || (@format == :human_v_computer && current_color == :black)
+  end
+
+  def show_play_not_valid
+    puts "Play not valid. Please try again."
+    puts ""
+  end
+
+  def terminal?
+    all_spaces_occupied? || both_players_blocked?
+  end
+
+  def select_play_by_human
+    @selected_play = PotentialPlay.new(@spaces, @placed_x, @placed_y, current_color)
+  end
+
+  def select_play_by_computer
+    if @format == :max_v_min && current_color == :white
+      min_score = @possible_plays.min_by(&:flip_count)&.flip_count
+      @selected_play = @possible_plays.select do |possible_play|
+        possible_play.flip_count == min_score
+      end.sample
+    elsif @format == :max_v_random && current_color == :white
+      @selected_play = @possible_plays.sample
+    else
+      max_score = @possible_plays.max_by(&:flip_count)&.flip_count
+      @selected_play = @possible_plays.select do |possible_play|
+        possible_play.flip_count == max_score
+      end.sample
+    end
+  end
+
+  def all_spaces_occupied?
+    @spaces.flatten.count(&:nil?) == 0
   end
 
   class PotentialPlay
@@ -304,7 +448,7 @@ class Othello
       :diag_neg_down
     ]
 
-    attr_reader :enclosed_opponents_count, :transformed_spaces, :x, :y
+    attr_reader :flip_count, :transformed_spaces, :x, :y
 
     def initialize(spaces, placed_x, placed_y, color)
       @placed_x = placed_x
@@ -317,7 +461,9 @@ class Othello
       @transformed_spaces[@placed_y][@placed_x] = @color
 
       @is_valid = false
-      @enclosed_opponents_count = 0
+      @flip_count = 0
+
+      check
     end
 
     def check
@@ -328,9 +474,13 @@ class Othello
         if checker.has_enclosure?
           @is_valid = true
           @transformed_spaces = checker.transformed_spaces
-          @enclosed_opponents_count += checker.enclosed_opponents_count
+          @flip_count += checker.flip_count
         end
       end
+    end
+
+    def not_valid?
+      !valid?
     end
 
     def valid?
@@ -339,7 +489,7 @@ class Othello
   end
 
   class AngleChecker
-    attr_reader :farthest_enclosing_x, :farthest_enclosing_y, :enclosed_opponents_count, :transformed_spaces
+    attr_reader :farthest_enclosing_x, :farthest_enclosing_y, :flip_count, :transformed_spaces
 
     def initialize(spaces, idx_x, idx_y, color, movement)
       @transformed_spaces = spaces.dup
@@ -355,8 +505,8 @@ class Othello
       @has_enclosure = false
       @farthest_enclosing_x = nil
       @farthest_enclosing_y = nil
-      @potentially_enclosed_opponents_count = 0
-      @enclosed_opponents_count = 0
+      @potentially_flip_count = 0
+      @flip_count = 0
       @has_opponent_color = false
       @stopped_by_empty_space = false
     end
@@ -428,15 +578,15 @@ class Othello
 
         if color_of_current_space == @opponent_color
           @has_opponent_color = true
-          @potentially_enclosed_opponents_count += 1
+          @potentially_flip_count += 1
         end
 
         if @has_opponent_color && color_of_current_space == @color
           @has_enclosure = true
           @farthest_enclosing_x = @idx_x
           @farthest_enclosing_y = @idx_y
-          @enclosed_opponents_count += @potentially_enclosed_opponents_count
-          @potentially_enclosed_opponents_count = 0
+          @flip_count += @potentially_flip_count
+          @potentially_flip_count = 0
           @has_opponent_color = false
         end
 
@@ -445,6 +595,74 @@ class Othello
 
       transform if @has_enclosure
     end
+  end
+
+  def percent(num, den)
+    return 0 if den == 0
+
+    (num.to_f / den.to_f * 100).round(2)
+  end
+
+  def run_series
+    # TODO: add input to choose format
+    # format = :max_v_random
+    format = :max_v_min
+    puts "How many games would you like to run?"
+    n = gets.strip.to_i
+
+    results = []
+    # max_blanks = 0
+    n.times.with_index { |_a, index| results << ::Othello.new.play_with_no_output(index, format) }
+
+    black_wins = results.count { |result| result[:black] > result[:white] }
+    white_wins = results.count { |result| result[:white] > result[:black] }
+    ties = results.count { |result| result[:black] == result[:white] }
+    blank_spaces = results.count { |result| result[:blank] > 0 }
+    max_blanks = results.max_by { |result| result[:blank] }[:blank]
+
+    # puts results
+    puts "================================"
+    puts "Games played: #{n.to_s.gsub(/\B(?=(...)*\b)/, ',')}"
+    puts "      Format: #{format}"
+    puts "--------------------------------"
+    puts "  Black wins: #{black_wins.to_s.rjust(3)}   #{("%.2f" % percent(black_wins, n)).to_s.rjust(6)}%"
+    puts "  White wins: #{white_wins.to_s.rjust(3)}   #{("%.2f" % percent(white_wins, n)).to_s.rjust(6)}%"
+    puts "        Ties: #{ties.to_s.rjust(3)}   #{("%.2f" % percent(ties, n)).to_s.rjust(6)}%"
+    puts "Blank spaces: #{blank_spaces.to_s.rjust(3)}   #{("%.2f" % percent(blank_spaces, n)).to_s.rjust(6)}% (max: #{max_blanks})"
+    puts "================================"
+  end
+
+  def play_with_no_output(index, format = :computer_v_computer)
+    @format = format
+
+    loop do
+      find_possible_plays
+
+      if terminal?
+        break
+      elsif current_player_blocked?
+        @previous_player_blocked = true
+        toggle_player
+        next
+      end
+
+      reset_blocked_player_counter
+      select_play_by_computer
+
+      update_after_move
+      toggle_player
+    end
+
+    result = {
+      index: "#{index}".rjust(5),
+      black: @black_score,
+      white: @white_score,
+      outcome: outcome,
+      blank: @spaces.flatten.count(&:nil?)
+    }
+
+    puts result
+    result
   end
 
   # +==========+
@@ -462,104 +680,51 @@ class Othello
     choose_format
 
     loop do
-      render()
-      puts "#{current_color}'s move:"
+      show_current_board
+      find_possible_plays
 
-      if (@format == :human_v_human) || (@format == :human_v_computer && current_color == :black)
-        coordinate = get_move_input()
-
-        if coordinate == :invalid_input
-          puts "Invalid input: #{@coords}. Please try again."
-          next
-        end
-
-        if space_occupied?(coordinate)
-          puts "Space #{@coords} is occupied. Please try again."
-          next
-        end
+      if terminal?
+        show_final
+        break
+      elsif current_player_blocked?
+        @previous_player_blocked = true
+        show_current_player_blocked
+        toggle_player
+        next
       end
 
-      possible_plays = []
-      @spaces.each_with_index do |row, y|
-        row.each_with_index do |entry, x|
-          next unless entry.nil?
+      reset_blocked_player_counter
+      show_next_move_prompt
 
-          potential_play = PotentialPlay.new(@spaces, x, y, current_color)
-          potential_play.check
+      if need_human_input?
+        retrieve_human_input
+        next if human_input_invalid?
 
-          if potential_play.valid?
-            possible_plays << potential_play
-          end
-        end
-      end
-
-      if possible_plays.empty?
-        if @endgame_watch == true
-          puts "No valid moves for #{current_color}."
-          puts ""
-          puts "================================"
-          puts "Game over!"
-          puts "================================"
-          puts ""
-          puts "Final board:"
-          render()
-          puts ""
-          white_score = @spaces.flatten.count { |space| space == :white }
-          black_score = @spaces.flatten.count { |space| space == :black }
-          puts "Scores:"
-          puts "Black: #{black_score}"
-          puts "White: #{white_score}"
-          puts ""
-          if black_score > white_score
-            puts "Black wins!"
-          elsif white_score > black_score
-            puts "White wins!"
-          else
-            puts "It's a tie!"
-          end
-          break
-        else
-          @endgame_watch = true
-          puts "No valid moves for #{current_color}."
-          puts ""
-          toggle_player
-          next
-        end
+        select_play_by_human
       else
-        @endgame_watch = false
+        select_play_by_computer
       end
 
-      if @format == :computer_v_computer || (@format == :human_v_computer && current_color == :white)
-        max_score = possible_plays.max_by(&:enclosed_opponents_count)&.enclosed_opponents_count
-        selected_play = possible_plays.select { |valid_potential_play| valid_potential_play.enclosed_opponents_count == max_score }.sample if max_score
-      else
-        selected_play = PotentialPlay.new(@spaces, coordinate.x, coordinate.y, current_color)
-        selected_play.check
-
-        unless selected_play.valid?
-          puts "Position #{@coords} is not playable by #{current_color}. Please try again."
-          puts ""
-          next
-        end
+      if @selected_play.not_valid? # only for human-selected plays
+        show_play_not_valid
+        next
       end
 
-      output_coords = COLUMNS[selected_play.x] + (selected_play.y + 1).to_s
-      puts output_coords
-      @spaces = selected_play.transformed_spaces
-      puts ""
-      puts "--------------------------------"
-      puts "#{current_color} placed at #{output_coords} and flipped #{selected_play.enclosed_opponents_count} #{opponent_color}s."
-      puts "Black: #{@spaces.flatten.count { |space| space == :black } }"
-      puts "White: #{@spaces.flatten.count { |space| space == :white } }"
-      puts ""
-
+      update_after_move
+      show_post_move_report
       toggle_player
     end
   end
 end
 
+# if __FILE__ == $0
+#   puts "Part 3:"
+#   Othello.new.play
+#   puts
+# end
+
 if __FILE__ == $0
   puts "Part 3:"
-  Othello.new.play
+  Othello.new.run_series
   puts
 end
